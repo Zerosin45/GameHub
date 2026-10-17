@@ -32,6 +32,12 @@ data class SystemStats(
     val storageFreeGb: Float,
 )
 
+/** CPU and GPU load in percent, or null when the phone does not expose it. */
+data class LoadStats(
+    val cpuPct: Int?,
+    val gpuPct: Int?,
+)
+
 data class GameSettings(
     val forceStop: Boolean,
     val silent: Boolean,
@@ -124,6 +130,53 @@ class Booster(val context: Context) {
             storageUsedPct = if (storageTotal > 0f) ((storageTotal - storageFree) / storageTotal * 100f).toInt() else 0,
             storageFreeGb = storageFree / gb,
         )
+    }
+
+    // ---------- CPU and GPU load (needs Shizuku) ----------
+
+    private var lastCpuTotal = 0L
+    private var lastCpuIdle = 0L
+
+    // Reads the first line of /proc/stat plus every GPU load file this phone has.
+    private val loadScript =
+        "head -n 1 /proc/stat; " +
+            "for f in /sys/class/kgsl/kgsl-3d0/gpu_busy_percentage " +
+            "/sys/kernel/ged/hal/gpu_utilization " +
+            "/sys/module/ged/parameters/gpu_loading " +
+            "/sys/class/devfreq/*mali*/load " +
+            "/sys/class/devfreq/*gpu*/load; do " +
+            "if [ -r \"\$f\" ]; then echo \"GPU:\$f=\$(cat \"\$f\" 2>/dev/null)\"; fi; done"
+
+    /** Call from a background thread: it runs a shell command through Shizuku. */
+    fun readLoad(): LoadStats {
+        val out = ShizukuHelper.execOutput(loadScript) ?: return LoadStats(null, null)
+
+        var cpu: Int? = null
+        val cpuLine = out.lineSequence().firstOrNull { it.startsWith("cpu ") }
+        if (cpuLine != null) {
+            val n = cpuLine.trim().split(Regex("\\s+")).drop(1).mapNotNull { it.toLongOrNull() }
+            if (n.size >= 5) {
+                val idle = n[3] + n[4]
+                val total = n.take(8).sum()
+                val dTotal = total - lastCpuTotal
+                val dIdle = idle - lastCpuIdle
+                if (lastCpuTotal != 0L && dTotal > 0) {
+                    cpu = ((dTotal - dIdle) * 100 / dTotal).toInt().coerceIn(0, 100)
+                }
+                lastCpuTotal = total
+                lastCpuIdle = idle
+            }
+        }
+
+        val gpu = out.lineSequence()
+            .filter { it.startsWith("GPU:") }
+            .mapNotNull { line ->
+                Regex("\\d+").find(line.substringAfter('='))?.value?.toIntOrNull()
+            }
+            .firstOrNull()
+            ?.coerceIn(0, 100)
+
+        return LoadStats(cpu, gpu)
     }
 
     // ---------- boosting ----------
