@@ -47,4 +47,21 @@ object ShizukuHelper {
     } catch (_: Throwable) {
         false
     }
+
+    /** Same as exec(), but returns what the command printed (null if it could not run). */
+    fun execOutput(command: String): String? = try {
+        val method = Shizuku::class.java.getDeclaredMethod(
+            "newProcess",
+            Array<String>::class.java,
+            Array<String>::class.java,
+            String::class.java,
+        )
+        method.isAccessible = true
+        val process = method.invoke(null, arrayOf("sh", "-c", command), null, null) as Process
+        val text = process.inputStream.bufferedReader().readText()
+        process.waitFor()
+        text
+    } catch (_: Throwable) {
+        null
+    }
 }
