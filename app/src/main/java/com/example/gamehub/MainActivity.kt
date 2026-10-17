@@ -57,7 +57,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import kotlin.math.absoluteValue
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 
 private val NavyDeep = Color(0xFF050B1A)
@@ -121,6 +123,17 @@ fun HubScreen(booster: Booster, games: List<GameApp>, powerMode: Boolean) {
         }
     }
 
+    val load by produceState(initialValue = LoadStats(null, null), powerMode) {
+        while (true) {
+            value = if (powerMode) {
+                withContext(Dispatchers.IO) { booster.readLoad() }
+            } else {
+                LoadStats(null, null)
+            }
+            delay(2000)
+        }
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -168,6 +181,32 @@ fun HubScreen(booster: Booster, games: List<GameApp>, powerMode: Boolean) {
             Gauge("TEMP", tempText, stats.tempC / 60f, if (stats.tempC > 42f) Red else Amber)
             Gauge("STORAGE", "${stats.storageUsedPct}%", stats.storageUsedPct / 100f, Blue)
         }
+
+        // ----- CPU / GPU (Shizuku) -----
+        val cpu = load.cpuPct
+        val gpu = load.gpuPct
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            Gauge("CPU", if (cpu != null) "$cpu%" else "--", (cpu ?: 0) / 100f, if ((cpu ?: 0) > 85) Red else Cyan)
+            Gauge("GPU", if (gpu != null) "$gpu%" else "--", (gpu ?: 0) / 100f, if ((gpu ?: 0) > 85) Red else Green)
+        }
+        Text(
+            when {
+                !powerMode -> "Turn on POWER to see CPU and GPU load"
+                gpu == null -> "GPU load is not readable on this phone"
+                else -> "CPU and GPU load, updated every 2 seconds"
+            },
+            color = Muted,
+            fontSize = 11.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp, bottom = 16.dp),
+        )
 
         // ----- game carousel -----
         if (games.isEmpty()) {
